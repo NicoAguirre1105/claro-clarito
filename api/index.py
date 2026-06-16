@@ -1,6 +1,7 @@
 import json, os
 import httpx
 from http.server import BaseHTTPRequestHandler
+from datetime import date
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -69,6 +70,7 @@ def send_message(chat_id: int, text: str):
     )
 
 def classify_message(text: str) -> str:
+    today = date.today().strftime("%d-%m-%Y")
     response = httpx.post(
         "https://api.anthropic.com/v1/messages",
         headers={
@@ -80,7 +82,7 @@ def classify_message(text: str) -> str:
             "model": "claude-haiku-4-5-20251001",
             "max_tokens": 512,
             "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": text}],
+            "messages": [{"role": "user", "content": f"Fecha actual: {today}\n{text}"}],
         },
         timeout=15,
     )
