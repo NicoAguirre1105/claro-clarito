@@ -77,6 +77,9 @@ def classify_message(text: str) -> dict:
         },
         timeout=15,
     )
+    print("STATUS:", response.status_code)
+    print("BODY:", response.text)
+    
     raw = response.json()["content"][0]["text"].strip()
     return json.loads(raw)
 
