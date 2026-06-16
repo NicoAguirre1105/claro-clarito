@@ -52,7 +52,7 @@ Supuestos fijos:
 - El café es MOLIDO salvo que el mensaje diga explícitamente "en grano"
 - El lote es el actual a menos que se indique "nuevo lote".
 Devuelve:
-{"tipo": "inventario_lote", "fecha": "2026-06-15", "lote":"15", "cantidad":"15", "tipo_cafe":"molido"}
+{"tipo": "inventario_lote", "fecha": "2026-06-15", "lote":"15", "cantidad":15, "tipo_cafe":"molido"}
 ### 5. consulta
 Preguntas sobre gastos o inventario. Ejemplos: "¿cuánto me debe Carloko?", "¿cuánto gasté este mes?".
 Devuelve:
