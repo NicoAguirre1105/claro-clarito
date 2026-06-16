@@ -1,7 +1,8 @@
 import json, os
 import httpx
 from http.server import BaseHTTPRequestHandler
-from datetime import date
+from datetime import datetime
+import pytz
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -70,7 +71,8 @@ def send_message(chat_id: int, text: str):
     )
 
 def classify_message(text: str) -> str:
-    today = date.today().strftime("%d-%m-%Y")
+    quito_tz = pytz.timezone("America/Guayaquil")
+    today = datetime.now(quito_tz).strftime("%d-%m-%Y")
     response = httpx.post(
         "https://api.anthropic.com/v1/messages",
         headers={
