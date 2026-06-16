@@ -61,7 +61,14 @@ Devuelve:
 - Cualquier mensaje que no corresponda claramente a gasto, inventario_entrega, inventario_pago, inventario_nuevo_lote o consulta — incluyendo saludos, mensajes de prueba, texto sin sentido — SIEMPRE devuelve: {"tipo": "desconocido", "mensaje_original": "texto del mensaje"} NUNCA devuelvas texto plano. SIEMPRE JSON.
 """
 
-def classify_message(text: str) -> dict:
+def send_message(chat_id: int, text: str):
+    httpx.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+        timeout=10,
+    )
+
+def classify_message(text: str) -> str:
     response = httpx.post(
         "https://api.anthropic.com/v1/messages",
         headers={
@@ -70,67 +77,14 @@ def classify_message(text: str) -> dict:
             "content-type": "application/json",
         },
         json={
-            "model": "claude-haiku-4-5",
+            "model": "claude-haiku-4-5-20251001",
             "max_tokens": 512,
             "system": SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": text}],
         },
         timeout=15,
     )
-    print("STATUS:", response.status_code)
-    print("BODY:", response.text)
-    
-    raw = response.json()["content"][0]["text"].strip()
-    return json.loads(raw)
-
-def format_response(data: dict) -> str:
-    tipo = data.get("tipo")
-
-    if tipo == "gasto":
-        return (
-            f"💸 *Gasto registrado*\n"
-            f"Monto: ${data.get('monto')}\n"
-            f"Descripción: {data.get('descripcion')}\n"
-            f"Categoría: `{data.get('categoria')}`\n"
-            f"Fecha: {data.get('fecha')}"
-        )
-    elif tipo == "inventario_entrega":
-        pagado = "Sí" if data.get("pagado_en_momento") else "No"
-        return (
-            f"📦 *Entrega de café*\n"
-            f"Cliente: {data.get('proveedor')}\n"
-            f"Cantidad: {data.get('cantidad')} fundas\n"
-            f"Tipo: {data.get('tipo_cafe')}\n"
-            f"Precio unitario: ${data.get('precio_unitario', 'ya registrado')}\n"
-            f"Pagado en momento: {pagado}\n"
-            f"Fecha: {data.get('fecha')}"
-        )
-    elif tipo == "inventario_pago":
-        return (
-            f"💰 *Pago recibido*\n"
-            f"Cliente: {data.get('proveedor')}\n"
-            f"Cantidad: {data.get('cantidad')} fundas\n"
-            f"Lote: {data.get('lote')}\n"
-            f"Fecha: {data.get('fecha')}"
-        )
-    elif tipo == "inventario_nuevo_lote":
-        return (
-            f"🏭 *Ingreso de lote*\n"
-            f"Lote: {data.get('lote')}\n"
-            f"Cantidad: {data.get('cantidad')} fundas\n"
-            f"Fecha: {data.get('fecha')}"
-        )
-    elif tipo == "consulta":
-        return f"🔍 *Consulta detectada*\n{data.get('pregunta')}\n\n_(las consultas aún no están implementadas)_"
-    else:
-        return f"❓ No entendí ese mensaje.\n`{data.get('mensaje_original', '')}`"
-
-def send_message(chat_id: int, text: str):
-    httpx.post(
-        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-        json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
-        timeout=10,
-    )
+    return response.json()["content"][0]["text"].strip()
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -141,10 +95,9 @@ class handler(BaseHTTPRequestHandler):
         chat_id = message["chat"]["id"]
 
         try:
-            classified = classify_message(text)
-            reply = format_response(classified)
+            reply = classify_message(text)
         except Exception as e:
-            reply = f"⚠️ Error al procesar el mensaje: {str(e)}"
+            reply = f"Error: {str(e)}"
 
         send_message(chat_id, reply)
 
