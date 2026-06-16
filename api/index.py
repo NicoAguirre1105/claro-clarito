@@ -11,7 +11,7 @@ SYSTEM_PROMPT = """
 Eres un asistente que clasifica mensajes de gastos e inventario de café y devuelves SIEMPRE un JSON válido, sin texto adicional, sin backticks, sin explicaciones.
 ## TIPOS DE MENSAJE
 ### 1. gasto
-Mensajes sobre dinero gastado. El formato puede variar: "50 frutería", "frutería 50", "gasté 50 en la frutería". La ubicación es Ecuador, así que las tiendas pueden ser buscadas para ver la categoría.
+Mensajes sobre dinero gastado. El formato puede variar: "50 frutería", "frutería 50", "gasté 50 en la frutería". La ubicación es Ecuador, así que las tiendas pueden ser buscadas para ver la categoría y el formato de descripción correcto (kfc -> KFC, mcdonalds -> McDonald's, y entre otras).
 Categorías disponibles (elige la más apropiada):
 - creditos: pagos de créditos bancarios, cuota de la casa
 - tarjetas: pago de tarjetas de crédito
@@ -47,7 +47,7 @@ Supuestos fijos:
 - El café es MOLIDO salvo que el mensaje diga explícitamente "en grano"
 - El lote es el actual a menos que se indique "nuevo lote".
 Devuelve:
-{"tipo": "inventario_nuevo_lote", "fecha": "2026-06-15", "lote":"15", "cantidad":"15"}
+{"tipo": "inventario_lote", "fecha": "2026-06-15", "lote":"15", "cantidad":"15", "tipo_cafe":"molido"}
 ### 5. consulta
 Preguntas sobre gastos o inventario. Ejemplos: "¿cuánto me debe Carloko?", "¿cuánto gasté este mes?".
 Devuelve:
@@ -58,8 +58,10 @@ Devuelve:
 {"tipo": "desconocido", "mensaje_original": "texto del mensaje"}
 ## REGLAS GENERALES
 - La fecha siempre en formato DD-MM-YYYY. Usa la fecha actual si no se especifica.
+- Cuando el mensaje mencione un día de la semana (ej. "el martes", "el lunes pasado"), calcula la fecha exacta contando hacia atrás desde el día actual indicado en el contexto. Si el día mencionado es el mismo día de la semana que hoy, asume que se refiere a la semana anterior.
 - Los montos siempre en número decimal (sin símbolo $).
-- Devuelve ÚNICAMENTE el JSON, nada más.
+- Devuelve ÚNICAMENTE JSON, nada más.
+- En caso de ser necesario,puedes devolver más de un JSON para categorizar distintas transacciones.
 - Cualquier mensaje que no corresponda claramente a gasto, inventario_entrega, inventario_pago, inventario_nuevo_lote o consulta — incluyendo saludos, mensajes de prueba, texto sin sentido — SIEMPRE devuelve: {"tipo": "desconocido", "mensaje_original": "texto del mensaje"} NUNCA devuelvas texto plano. SIEMPRE JSON.
 """
 
@@ -72,7 +74,14 @@ def send_message(chat_id: int, text: str):
 
 def classify_message(text: str) -> str:
     quito_tz = pytz.timezone("America/Guayaquil")
-    today = datetime.now(quito_tz).strftime("%d-%m-%Y")
+    now = datetime.now(quito_tz)
+
+    dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+    dia_actual = dias[now.weekday()]
+    today = now.strftime("%d-%m-%Y")
+    
+    contexto_fecha = f"Hoy es {dia_actual}, {today}."
+
     response = httpx.post(
         "https://api.anthropic.com/v1/messages",
         headers={
@@ -84,7 +93,7 @@ def classify_message(text: str) -> str:
             "model": "claude-haiku-4-5-20251001",
             "max_tokens": 512,
             "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": f"Fecha actual: {today}\n{text}"}],
+            "messages": [{"role": "user", "content": f"{contexto_fecha}\n{text}"}],
         },
         timeout=15,
     )
