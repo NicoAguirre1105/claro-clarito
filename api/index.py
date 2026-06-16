@@ -6,6 +6,11 @@ import pytz
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ALLOWED_CHAT_IDS = [
+    int(cid.strip())
+    for cid in os.environ.get("ALLOWED_CHAT_IDS", "").split(",")
+    if cid.strip()
+]
 
 SYSTEM_PROMPT = """
 Eres un asistente que clasifica mensajes de gastos e inventario de café y devuelves SIEMPRE un JSON válido, sin texto adicional, sin backticks, sin explicaciones.
@@ -100,12 +105,19 @@ def classify_message(text: str) -> str:
     return response.json()["content"][0]["text"].strip()
 
 class handler(BaseHTTPRequestHandler):
-    def do_POST(self):
+     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length))
         message = body.get("message", {})
         text = message.get("text", "")
         chat_id = message["chat"]["id"]
+
+        if chat_id not in ALLOWED_CHAT_IDS:
+            send_message(chat_id, 'Usuario no autorizado.')
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
 
         try:
             reply = classify_message(text)
