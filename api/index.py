@@ -154,23 +154,42 @@ def classify_message(text: str, now: datetime) -> str:
 
 def parse_reply_jsons(reply: str) -> list:
     """Parse one or more JSON objects from a reply string."""
+    # Try full string first
     try:
         parsed = json.loads(reply)
         return parsed if isinstance(parsed, list) else [parsed]
     except json.JSONDecodeError:
-        results = []
-        for line in reply.strip().splitlines():
-            line = line.strip()
-            if line:
+        pass
+    # Try line by line (multiple JSONs on separate lines)
+    results = []
+    for line in reply.strip().splitlines():
+        line = line.strip()
+        if line:
+            try:
+                results.append(json.loads(line))
+            except Exception:
+                pass
+    if results:
+        return results
+    # Last resort: extract JSON objects via braces matching
+    extracted = []
+    depth, start = 0, None
+    for i, ch in enumerate(reply):
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start is not None:
                 try:
-                    results.append(json.loads(line))
+                    extracted.append(json.loads(reply[start:i + 1]))
                 except Exception:
                     pass
-        return results
+    return extracted
 
 # ── Log sheet ──────────────────────────────────────────────────────────────────
-def log_to_sheet(message_text: str, reply: str, now: datetime):
-    client = get_gspread_client()
+def log_to_sheet(client, message_text: str, reply: str, now: datetime):
     sheet = client.open_by_key(SHEET_ID_LOG).sheet1
     fecha = now.strftime("%d-%m-%Y %H:%M")
     sheet.insert_row([fecha, message_text, reply], index=3)
@@ -299,8 +318,7 @@ def get_or_create_month_sheet(spreadsheet, year: int, month: int):
     return setup_month_sheet(spreadsheet, sheet_name, saldo_anterior)
 
 
-def log_gasto(gasto: dict, now: datetime):
-    client = get_gspread_client()
+def log_gasto(client, gasto: dict, now: datetime):
     spreadsheet = client.open_by_key(SHEET_ID_GASTOS)
 
     try:
@@ -355,13 +373,33 @@ class handler(BaseHTTPRequestHandler):
         quito_tz = pytz.timezone("America/Guayaquil")
         now = datetime.now(quito_tz)
 
+        # Single shared client for all sheet operations
+        try:
+            sheets_client = get_gspread_client()
+        except Exception:
+            send_message(chat_id, "Hubo un error, inténtalo nuevamente.")
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
+
+        # Classify
         try:
             reply = classify_message(text, now)
         except Exception as e:
-            reply = f"Error: {str(e)}"
+            error_reply = f"ERROR_MODELO: {e}"
+            try:
+                log_to_sheet(sheets_client, text, error_reply, now)
+            except Exception:
+                pass
+            send_message(chat_id, "Ha ocurrido un error con el modelo. Inténtalo más tarde.")
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
 
         try:
-            log_to_sheet(text, reply, now)
+            log_to_sheet(sheets_client, text, reply, now)
         except Exception:
             send_message(chat_id, "Hubo un error, inténtalo nuevamente.")
 
@@ -375,10 +413,12 @@ class handler(BaseHTTPRequestHandler):
                             "Vuelve a escribir el mensaje con la información correcta.",
                         )
                     else:
-                        log_gasto(item, now)
+                        log_gasto(sheets_client, item, now)
+                        desc = item.get("descripcion", "")
+                        desc_cap = desc[0].upper() + desc[1:] if desc else ""
                         send_message(
                             chat_id,
-                            f"Gasto {item.get('descripcion', '')[0].upper() + item.get('descripcion', '')[1:]} de ${float(item.get('monto')):.2f} ingresado.",
+                            f"Gasto {desc_cap} de ${float(item.get('monto')):.2f} ingresado.",
                         )
         except Exception:
             send_message(chat_id, "Hubo un error, inténtalo nuevamente.")
