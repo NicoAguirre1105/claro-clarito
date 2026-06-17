@@ -378,6 +378,10 @@ class handler(BaseHTTPRequestHandler):
                         )
                     else:
                         log_gasto(item, now)
+                        send_message(
+                            chat_id,
+                            f"Gasto {item.get('descripcion')} de ${float(item.get('monto')):.2f} ingresado.",
+                        )
         except Exception as gasto_err:
             send_message(chat_id, f"⚠️ Gastos error: {gasto_err}")
 
