@@ -116,7 +116,11 @@ def classify_message(text: str, now: datetime) -> str:
         },
         timeout=15,
     )
-    return response.json()["content"][0]["text"].strip()
+    text = response.json()["content"][0]["text"].strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        text = text.rsplit("```", 1)[0]
+    return text.strip()
 
 class handler(BaseHTTPRequestHandler):
      def do_POST(self):
