@@ -14,8 +14,9 @@ ALLOWED_CHAT_IDS = [
     for cid in os.environ.get("ALLOWED_CHAT_IDS", "").split(",")
     if cid.strip()
 ]
-SHEET_ID_LOG    = os.environ.get("SHEET_ID_LOG", "")
-SHEET_ID_GASTOS = os.environ.get("SHEET_ID_GASTOS", "")
+SHEET_ID_LOG         = os.environ.get("SHEET_ID_LOG", "")
+SHEET_ID_GASTOS      = os.environ.get("SHEET_ID_GASTOS", "")
+SHEET_ID_INVENTARIO  = os.environ.get("SHEET_ID_INVENTARIO", "")
 GPC_SERVICE_ACCOUNT_JSON = os.environ.get("GPC_SERVICE_ACCOUNT_JSON", "")
 
 # ── Gastos constants ───────────────────────────────────────────────────────────
@@ -80,16 +81,16 @@ Supuestos fijos:
 - La entrega NO fue pagada en el momento salvo que se diga explicitamente
 - Si no hay precio inicial, ya está ingresado en la tabla.
 Devuelve:
-{"tipo": "inventario_entrega", "proveedor": "Carloko", "cantidad": 30, "tipo_cafe": "molido", "precio_unitario": 3.00, "pagado_en_momento": false, "fecha": "2026-06-15"}
+{"tipo": "inventario_entrega", "cliente": "Carloko", "cantidad": 30, "tipo_cafe": "molido", "precio_unitario": 3.00, "pagado_en_momento": false, "fecha": "2026-06-15"}
 ### 3. inventario_pago
 Mensajes sobre pagos realizados. Ejemplos: "Carloko depositó de 5 fundas", "Merceditas pagó 30 fundas del lote anterior".
 Devuelve:
-{"tipo": "inventario_pago", "proveedor": "Carloko", "cantidad": 5, "fecha": "2026-06-15", "lote":"anterior"}
+{"tipo": "inventario_pago", "cliente": "Carloko", "cantidad": 5, "tipo_cafe":"molido" "fecha": "2026-06-15", "lote":"anterior"}
 ### 4. inventario_lote
 Mensajes sobre ingreso de mercadería de un lote de café. Ejemplos: "Ingreso de 15 fundas de café en grano del lote 15", "100 fundas empacadas de café".
 Supuestos fijos:
 - El café es MOLIDO salvo que el mensaje diga explícitamente "en grano"
-- El lote es el actual a menos que se indique "nuevo lote".
+- El lote es el actual a menos que se indique un lote específico.
 Devuelve:
 {"tipo": "inventario_lote", "fecha": "2026-06-15", "lote":"15", "cantidad":15, "tipo_cafe":"molido"}
 ### 5. consulta
@@ -354,6 +355,253 @@ def log_gasto(client, gasto: dict, now: datetime):
     ]})
 
 
+# ── Inventario sheet ───────────────────────────────────────────────────────────
+def setup_lote_sheet(spreadsheet, lote_num: int):
+    """Create and format a new LOTE sheet."""
+    sheet_name = f"LOTE {lote_num}"
+    ws = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
+    sid = ws.id
+
+    # Fixed table headers and formulas
+    ws.update("B3:G3", [["Número de lote", "Grano", "Molido", "Stock en grano", "Stock molido", "Ingresos"]])
+    ws.update(
+        "B4:G4",
+        [[lote_num, 0, 0,
+          '=C4-SUMIF(C8:C1000,"Grano",D8:D1000)',
+          '=D4-SUMIF(C8:C1000,"Molido",D8:D1000)',
+          "=SUM(H8:H1000)"]],
+        value_input_option="USER_ENTERED",
+    )
+
+    # Client table header
+    ws.update("B7:H7", [["Cliente", "Tipo", "Cantidad", "Pagadas", "Precio unitario", "Deuda", "Total"]])
+
+    # History table header
+    ws.update("J7:N7", [["Fecha", "Acción", "Cliente", "Cantidad", "Mensaje"]])
+
+    border      = {"style": "SOLID", "width": 1, "color": {"red": 0, "green": 0, "blue": 0}}
+    borders     = {"top": border, "bottom": border, "left": border, "right": border,
+                   "innerHorizontal": border, "innerVertical": border}
+    lila        = {"red": 0.576, "green": 0.439, "blue": 0.859}
+    green       = {"red": 0.133, "green": 0.694, "blue": 0.298}
+    orange      = {"red": 0.902, "green": 0.494, "blue": 0.133}
+    white_text  = {"foregroundColor": {"red": 1, "green": 1, "blue": 1}, "bold": True}
+    currency_fmt = {"numberFormat": {"type": "CURRENCY", "pattern": "\"$\"#,##0.00"}}
+
+    spreadsheet.batch_update({"requests": [
+        # Fixed table header: lila + bold white (B3:G3)
+        {"repeatCell": {
+            "range": {"sheetId": sid, "startRowIndex": 2, "endRowIndex": 3,
+                      "startColumnIndex": 1, "endColumnIndex": 7},
+            "cell": {"userEnteredFormat": {"backgroundColor": lila, "textFormat": white_text}},
+            "fields": "userEnteredFormat(backgroundColor,textFormat)"}},
+        # Fixed table borders (B3:G4)
+        {"updateBorders": {"range": {"sheetId": sid, "startRowIndex": 2, "endRowIndex": 4,
+                                     "startColumnIndex": 1, "endColumnIndex": 7}, **borders}},
+        # G4 currency format
+        {"repeatCell": {
+            "range": {"sheetId": sid, "startRowIndex": 3, "endRowIndex": 4,
+                      "startColumnIndex": 6, "endColumnIndex": 7},
+            "cell": {"userEnteredFormat": currency_fmt},
+            "fields": "userEnteredFormat.numberFormat"}},
+
+        # Client table header: green + bold white (B7:H7)
+        {"repeatCell": {
+            "range": {"sheetId": sid, "startRowIndex": 6, "endRowIndex": 7,
+                      "startColumnIndex": 1, "endColumnIndex": 8},
+            "cell": {"userEnteredFormat": {"backgroundColor": green, "textFormat": white_text}},
+            "fields": "userEnteredFormat(backgroundColor,textFormat)"}},
+        # Client table header borders (B7:H7)
+        {"updateBorders": {"range": {"sheetId": sid, "startRowIndex": 6, "endRowIndex": 7,
+                                     "startColumnIndex": 1, "endColumnIndex": 8}, **borders}},
+
+        # History table header: orange + bold white (J7:N7)
+        {"repeatCell": {
+            "range": {"sheetId": sid, "startRowIndex": 6, "endRowIndex": 7,
+                      "startColumnIndex": 9, "endColumnIndex": 14},
+            "cell": {"userEnteredFormat": {"backgroundColor": orange, "textFormat": white_text}},
+            "fields": "userEnteredFormat(backgroundColor,textFormat)"}},
+        # History table header borders (J7:N7)
+        {"updateBorders": {"range": {"sheetId": sid, "startRowIndex": 6, "endRowIndex": 7,
+                                     "startColumnIndex": 9, "endColumnIndex": 14}, **borders}},
+    ]})
+    return ws
+
+
+def get_max_lote_sheet(spreadsheet):
+    """Return (worksheet, lote_number) for the sheet with the highest LOTE number."""
+    max_num = 0
+    max_ws  = None
+    for ws in spreadsheet.worksheets():
+        if ws.title.startswith("LOTE "):
+            try:
+                num = int(ws.title.split(" ", 1)[1])
+                if num > max_num:
+                    max_num = num
+                    max_ws  = ws
+            except ValueError:
+                pass
+    return max_ws, max_num
+
+
+def get_or_create_lote_sheet(spreadsheet, lote_num: int):
+    try:
+        return spreadsheet.worksheet(f"LOTE {lote_num}")
+    except gspread.WorksheetNotFound:
+        return setup_lote_sheet(spreadsheet, lote_num)
+
+
+def _find_client_row(ws, cliente: str, tipo_cafe: str):
+    """Return 1-based row index where client+type match, or None."""
+    col_b = ws.col_values(2)  # column B
+    col_c = ws.col_values(3)  # column C
+    for i in range(7, len(col_b)):  # data starts at row 8 (index 7)
+        if (col_b[i].strip().lower() == cliente.strip().lower() and
+                col_c[i].strip().lower() == tipo_cafe.strip().lower()):
+            return i + 1
+    return None
+
+
+def _next_empty_row(ws, col_index: int, start_row: int = 8):
+    """Find next empty row in a column (1-based col_index)."""
+    values = ws.col_values(col_index)
+    for i in range(start_row - 1, len(values)):
+        if not values[i].strip():
+            return i + 1
+    return max(len(values) + 1, start_row)
+
+
+def _format_client_row(spreadsheet, ws, row: int):
+    border = {"style": "SOLID", "width": 1, "color": {"red": 0, "green": 0, "blue": 0}}
+    currency_fmt = {"numberFormat": {"type": "CURRENCY", "pattern": "\"$\"#,##0.00"}}
+    ri = row - 1
+    spreadsheet.batch_update({"requests": [
+        {"updateBorders": {
+            "range": {"sheetId": ws.id, "startRowIndex": ri, "endRowIndex": ri + 1,
+                      "startColumnIndex": 1, "endColumnIndex": 8},
+            "top": border, "bottom": border, "left": border, "right": border,
+            "innerVertical": border,
+        }},
+        # Precio unitario (F = col index 5)
+        {"repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": ri, "endRowIndex": ri + 1,
+                      "startColumnIndex": 5, "endColumnIndex": 6},
+            "cell": {"userEnteredFormat": currency_fmt},
+            "fields": "userEnteredFormat.numberFormat"}},
+        # Total (H = col index 7)
+        {"repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": ri, "endRowIndex": ri + 1,
+                      "startColumnIndex": 7, "endColumnIndex": 8},
+            "cell": {"userEnteredFormat": currency_fmt},
+            "fields": "userEnteredFormat.numberFormat"}},
+    ]})
+
+
+def _format_history_row(spreadsheet, ws, row: int):
+    border = {"style": "SOLID", "width": 1, "color": {"red": 0, "green": 0, "blue": 0}}
+    ri = row - 1
+    spreadsheet.batch_update({"requests": [
+        {"updateBorders": {
+            "range": {"sheetId": ws.id, "startRowIndex": ri, "endRowIndex": ri + 1,
+                      "startColumnIndex": 9, "endColumnIndex": 14},
+            "top": border, "bottom": border, "left": border, "right": border,
+            "innerVertical": border,
+        }},
+    ]})
+
+
+def _append_history(ws, spreadsheet, now: datetime, accion: str, cliente: str, cantidad: int, mensaje: str):
+    fecha = now.strftime("%d-%m-%Y %H:%M")
+    row = _next_empty_row(ws, col_index=10, start_row=8)  # column J = 10
+    ws.update(f"J{row}:N{row}", [[fecha, accion, cliente, cantidad, mensaje]])
+    _format_history_row(spreadsheet, ws, row)
+
+
+def log_inventario_lote(client, item: dict, now: datetime):
+    spreadsheet = client.open_by_key(SHEET_ID_INVENTARIO)
+    lote_num  = int(item.get("lote", 1))
+    tipo_cafe = item.get("tipo_cafe", "molido").strip().lower()
+    cantidad  = int(item.get("cantidad", 0))
+
+    ws = get_or_create_lote_sheet(spreadsheet, lote_num)
+
+    if tipo_cafe == "grano":
+        current = ws.acell("C4").value or "0"
+        ws.update("C4", [[int(str(current).replace(",", "").strip() or "0") + cantidad]])
+    else:
+        current = ws.acell("D4").value or "0"
+        ws.update("D4", [[int(str(current).replace(",", "").strip() or "0") + cantidad]])
+
+    _append_history(ws, spreadsheet, now, "Ingreso stock", "", cantidad, item.get("_raw", ""))
+
+
+def log_inventario_entrega(client, item: dict, now: datetime):
+    spreadsheet = client.open_by_key(SHEET_ID_INVENTARIO)
+    ws, _ = get_max_lote_sheet(spreadsheet)
+    if not ws:
+        raise ValueError("No hay lotes registrados en el inventario.")
+
+    cliente   = item.get("cliente", "").strip()
+    tipo_cafe = item.get("tipo_cafe", "molido").strip().capitalize()
+    cantidad  = int(item.get("cantidad", 0))
+    precio    = float(item.get("precio_unitario", 0))
+    pagado    = item.get("pagado_en_momento", False)
+
+    existing_row = _find_client_row(ws, cliente, tipo_cafe)
+    if existing_row:
+        current_d = int(str(ws.cell(existing_row, 4).value or "0").replace(",", "").strip() or "0")
+        ws.update_cell(existing_row, 4, current_d + cantidad)
+        if pagado:
+            current_e = int(str(ws.cell(existing_row, 5).value or "0").replace(",", "").strip() or "0")
+            ws.update_cell(existing_row, 5, current_e + cantidad)
+    else:
+        row = _next_empty_row(ws, col_index=2, start_row=8)
+        pagadas = cantidad if pagado else 0
+        ws.update(
+            f"B{row}:H{row}",
+            [[cliente, tipo_cafe, cantidad, pagadas, precio,
+              f"=D{row}-E{row}", f"=E{row}*F{row}"]],
+            value_input_option="USER_ENTERED",
+        )
+        _format_client_row(spreadsheet, ws, row)
+
+    _append_history(ws, spreadsheet, now, "Venta", cliente, cantidad, item.get("_raw", ""))
+
+
+def log_inventario_pago(client, item: dict, now: datetime) -> str | None:
+    """Returns an error message string if something went wrong, else None."""
+    spreadsheet = client.open_by_key(SHEET_ID_INVENTARIO)
+    lote_ref  = str(item.get("lote", "actual")).strip().lower()
+    cliente   = item.get("cliente", "").strip()
+    cantidad  = int(item.get("cantidad", 0))
+    tipo_cafe = item.get("tipo_cafe", "molido").strip().capitalize()
+
+    max_ws, max_num = get_max_lote_sheet(spreadsheet)
+    if not max_ws:
+        return "No hay lotes registrados en el inventario."
+
+    if lote_ref == "anterior":
+        target_num = max_num - 1
+        if target_num < 1:
+            return "No existe un lote anterior."
+        try:
+            ws = spreadsheet.worksheet(f"LOTE {target_num}")
+        except gspread.WorksheetNotFound:
+            return f"No se encontró la hoja LOTE {target_num}."
+    else:
+        ws = max_ws
+
+    existing_row = _find_client_row(ws, cliente, tipo_cafe)
+    if not existing_row:
+        return f"No hay una venta registrada a {cliente} de tipo {tipo_cafe}."
+
+    current_e = int(str(ws.cell(existing_row, 5).value or "0").replace(",", "").strip() or "0")
+    ws.update_cell(existing_row, 5, current_e + cantidad)
+
+    _append_history(ws, spreadsheet, now, "Pago", cliente, cantidad, item.get("_raw", ""))
+    return None
+
+
 # ── Handler ────────────────────────────────────────────────────────────────────
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -405,7 +653,10 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             for item in parse_reply_jsons(reply):
-                if item.get("tipo") == "gasto":
+                item["_raw"] = text
+                tipo = item.get("tipo")
+
+                if tipo == "gasto":
                     if not item.get("monto") or not item.get("descripcion"):
                         send_message(
                             chat_id,
@@ -416,10 +667,33 @@ class handler(BaseHTTPRequestHandler):
                         log_gasto(sheets_client, item, now)
                         desc = item.get("descripcion", "")
                         desc_cap = desc[0].upper() + desc[1:] if desc else ""
+                        send_message(chat_id, f"Gasto {desc_cap} de ${float(item.get('monto')):.2f} ingresado.")
+
+                elif tipo == "inventario_lote":
+                    log_inventario_lote(sheets_client, item, now)
+                    tipo_cafe = item.get("tipo_cafe", "molido").capitalize()
+                    send_message(
+                        chat_id,
+                        f"Lote {item.get('lote')}: {item.get('cantidad')} fundas de {tipo_cafe} ingresadas.",
+                    )
+
+                elif tipo == "inventario_entrega":
+                    log_inventario_entrega(sheets_client, item, now)
+                    send_message(
+                        chat_id,
+                        f"Entrega de {item.get('cantidad')} fundas a {item.get('cliente')} registrada.",
+                    )
+
+                elif tipo == "inventario_pago":
+                    error = log_inventario_pago(sheets_client, item, now)
+                    if error:
+                        send_message(chat_id, error)
+                    else:
                         send_message(
                             chat_id,
-                            f"Gasto {desc_cap} de ${float(item.get('monto')):.2f} ingresado.",
+                            f"Pago de {item.get('cantidad')} fundas de {item.get('cliente')} registrado.",
                         )
+
         except Exception:
             send_message(chat_id, "Hubo un error, inténtalo nuevamente.")
 
