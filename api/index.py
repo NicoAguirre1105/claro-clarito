@@ -201,9 +201,9 @@ def setup_month_sheet(spreadsheet, sheet_name: str, saldo_anterior: float):
     border   = {"style": "SOLID", "width": 1, "color": {"red": 0, "green": 0, "blue": 0}}
     borders  = {"top": border, "bottom": border, "left": border, "right": border,
                 "innerHorizontal": border, "innerVertical": border}
-    green    = {"red": 0.576, "green": 0.769, "blue": 0.490}   # #93C47D
-    yellow   = {"red": 1.0,   "green": 0.949, "blue": 0.8}     # #FFF2CC
-    red      = {"red": 0.918, "green": 0.6,   "blue": 0.6}     # #EA9999
+    green    = {"red": 0.153, "green": 0.804, "blue": 0.153}   # #27CD27
+    yellow   = {"red": 1.0,   "green": 0.859, "blue": 0.0}     # #FFDB00
+    red      = {"red": 0.918, "green": 0.196, "blue": 0.196}   # #EB3232
     currency = {"numberFormat": {"type": "CURRENCY", "pattern": "\"$\"#,##0.00"}}
 
     spreadsheet.batch_update({"requests": [
