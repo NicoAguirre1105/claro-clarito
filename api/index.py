@@ -312,7 +312,8 @@ def log_gasto(gasto: dict, now: datetime):
 
     category      = CATEGORY_MAP.get(gasto.get("categoria", ""), "Varios")
     fecha_display = f"{d:02d}/{m:02d}/{y}"
-    detalle       = gasto.get("descripcion", "").capitalize()
+    raw_detalle   = gasto.get("descripcion", "")
+    detalle       = raw_detalle[0].upper() + raw_detalle[1:] if raw_detalle else ""
     monto         = float(gasto.get("monto", 0))
 
     ws.insert_row(["", fecha_display, detalle, category, monto], index=26)
