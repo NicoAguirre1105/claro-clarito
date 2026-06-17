@@ -3,6 +3,8 @@ import httpx
 from http.server import BaseHTTPRequestHandler
 from datetime import datetime
 import pytz
+import gspread
+from google.oauth2.service_account import Credentials
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -11,6 +13,21 @@ ALLOWED_CHAT_IDS = [
     for cid in os.environ.get("ALLOWED_CHAT_IDS", "").split(",")
     if cid.strip()
 ]
+
+SHEET_ID_LOG = os.environ.get("SHEET_ID_LOG", "")
+GPC_SERVICE_ACCOUNT_JSON = os.environ.get("GPC_SERVICE_ACCOUNT_JSON", "")
+
+def log_to_sheet(message_text: str, reply: str, now: datetime):
+    creds_info = json.loads(GPC_SERVICE_ACCOUNT_JSON)
+    creds = Credentials.from_service_account_info(
+        creds_info,
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
+    )
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(SHEET_ID_LOG).sheet1
+
+    fecha = now.strftime("%d-%m-%Y %H:%M")
+    sheet.insert_row([fecha, message_text, reply], index=3)
 
 SYSTEM_PROMPT = """
 Eres un asistente que clasifica mensajes de gastos e inventario de café y devuelves SIEMPRE un JSON válido, sin texto adicional, sin backticks, sin explicaciones.
@@ -77,10 +94,7 @@ def send_message(chat_id: int, text: str):
         timeout=10,
     )
 
-def classify_message(text: str) -> str:
-    quito_tz = pytz.timezone("America/Guayaquil")
-    now = datetime.now(quito_tz)
-
+def classify_message(text: str, now: datetime) -> str:
     dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
     dia_actual = dias[now.weekday()]
     today = now.strftime("%d-%m-%Y")
@@ -119,12 +133,20 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(b"ok")
             return
 
+        quito_tz = pytz.timezone("America/Guayaquil")
+        now = datetime.now(quito_tz)
+
         try:
-            reply = classify_message(text)
+            reply = classify_message(text, now)
         except Exception as e:
             reply = f"Error: {str(e)}"
 
         send_message(chat_id, reply)
+
+        try:
+            log_to_sheet(text, reply, now)
+        except Exception:
+            pass
 
         self.send_response(200)
         self.end_headers()
