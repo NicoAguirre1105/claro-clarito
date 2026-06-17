@@ -378,7 +378,7 @@ class handler(BaseHTTPRequestHandler):
                         log_gasto(item, now)
                         send_message(
                             chat_id,
-                            f"Gasto {item.get('descripcion')} de ${float(item.get('monto')):.2f} ingresado.",
+                            f"Gasto {item.get('descripcion', '')[0].upper() + item.get('descripcion', '')[1:]} de ${float(item.get('monto')):.2f} ingresado.",
                         )
         except Exception:
             send_message(chat_id, "Hubo un error, inténtalo nuevamente.")
