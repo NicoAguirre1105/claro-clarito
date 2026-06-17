@@ -360,12 +360,10 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:
             reply = f"Error: {str(e)}"
 
-        send_message(chat_id, reply)
-
         try:
             log_to_sheet(text, reply, now)
-        except Exception as log_err:
-            send_message(chat_id, f"⚠️ Log error: {log_err}")
+        except Exception:
+            send_message(chat_id, "Hubo un error, inténtalo nuevamente.")
 
         try:
             for item in parse_reply_jsons(reply):
@@ -382,8 +380,8 @@ class handler(BaseHTTPRequestHandler):
                             chat_id,
                             f"Gasto {item.get('descripcion')} de ${float(item.get('monto')):.2f} ingresado.",
                         )
-        except Exception as gasto_err:
-            send_message(chat_id, f"⚠️ Gastos error: {gasto_err}")
+        except Exception:
+            send_message(chat_id, "Hubo un error, inténtalo nuevamente.")
 
         self.send_response(200)
         self.end_headers()
