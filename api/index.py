@@ -315,7 +315,7 @@ def log_gasto(gasto: dict, now: datetime):
     detalle       = gasto.get("descripcion", "")
     monto         = float(gasto.get("monto", 0))
 
-    ws.insert_row([fecha_display, detalle, category, monto], index=26)
+    ws.insert_row(["", fecha_display, detalle, category, monto], index=26)
 
     # Apply borders + currency format to the newly inserted row (always row 26)
     border = {"style": "SOLID", "width": 1, "color": {"red": 0, "green": 0, "blue": 0}}
