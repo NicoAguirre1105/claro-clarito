@@ -369,10 +369,10 @@ class handler(BaseHTTPRequestHandler):
         try:
             for item in parse_reply_jsons(reply):
                 if item.get("tipo") == "gasto":
-                    if not item.get("monto"):
+                    if not item.get("monto") or not item.get("descripcion"):
                         send_message(
                             chat_id,
-                            "Tu mensaje de tipo gasto no tiene un monto y no fue ingresado al archivo. "
+                            "Tu mensaje de tipo gasto no tiene un monto y/o descripción y no fue ingresado al archivo. "
                             "Vuelve a escribir el mensaje con la información correcta.",
                         )
                     else:
