@@ -185,14 +185,14 @@ def setup_month_sheet(spreadsheet, sheet_name: str, saldo_anterior: float):
     ws.update("B2:E2", [["Saldo", "Presupuesto", "Gastos", "Disponible"]])
     ws.update(
         "B3:E3",
-        [[saldo_anterior, 3500, "=SUM(E26:E1000)", "=C3+B3-D3"]],
+        [[saldo_anterior, 3500, "=SUM(E25:E1000)", "=C3+B3-D3"]],
         value_input_option="USER_ENTERED",
     )
     ws.update("B7:C7", [["Categoría", "Monto"]])
     ws.update("B8:B22", [[cat] for cat in CATEGORIES])
     ws.update(
         "C8:C22",
-        [[f'=SUMIF(D26:D1000,"{cat}",E26:E1000)'] for cat in CATEGORIES],
+        [[f'=SUMIF(D25:D1000,"{cat}",E25:E1000)'] for cat in CATEGORIES],
         value_input_option="USER_ENTERED",
     )
     ws.update("B25:E25", [["Fecha", "Detalle", "Categoría", "Monto"]])
@@ -312,7 +312,7 @@ def log_gasto(gasto: dict, now: datetime):
 
     category      = CATEGORY_MAP.get(gasto.get("categoria", ""), "Varios")
     fecha_display = f"{d:02d}/{m:02d}/{y}"
-    detalle       = gasto.get("descripcion", "")
+    detalle       = gasto.get("descripcion", "").capitalize()
     monto         = float(gasto.get("monto", 0))
 
     ws.insert_row(["", fecha_display, detalle, category, monto], index=26)
