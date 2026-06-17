@@ -113,7 +113,7 @@ class handler(BaseHTTPRequestHandler):
         chat_id = message["chat"]["id"]
 
         if chat_id not in ALLOWED_CHAT_IDS:
-            send_message(chat_id, 'Usuario no autorizado.')
+            send_message(chat_id, 'Usuario no autorizado, comuníquese con el creador del bot.')
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"ok")
