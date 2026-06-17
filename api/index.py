@@ -145,8 +145,8 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             log_to_sheet(text, reply, now)
-        except Exception:
-            pass
+        except Exception as log_err:
+            send_message(chat_id, f"⚠️ Log error: {log_err}")
 
         self.send_response(200)
         self.end_headers()
