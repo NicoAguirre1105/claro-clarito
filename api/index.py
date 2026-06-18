@@ -87,13 +87,13 @@ Mensajes sobre pagos realizados. Ejemplos: "Carloko depositó de 5 fundas", "Mer
 Devuelve:
 {"tipo": "inventario_pago", "cliente": "Carloko", "cantidad": 5, "tipo_cafe":"molido" "fecha": "2026-06-15", "lote":"anterior"}
 ### 4. inventario_lote
-Mensajes sobre ingreso de mercadería de un lote de café. Ejemplos: "Ingreso de 15 fundas de café en grano del lote 15", "100 fundas empacadas de café".
+Mensajes sobre ingreso de mercadería de un lote de café. Ejemplos: "Ingreso de 15 fundas de café en grano del lote 15", "100 fundas empacadas de café", "Ingreso 10 fundsa de cafe en lote nuevo"
 Supuestos fijos:
 - El café es MOLIDO salvo que el mensaje diga explícitamente "en grano"
 - El lote es el actual a menos que se indique un lote específico.
-- Se acepta decir lote nuevo para la creación de un nuevo lote
 Devuelve:
-{"tipo": "inventario_lote", "fecha": "2026-06-15", "lote":"15", "cantidad":15, "tipo_cafe":"molido"}
+{"tipo": "inventario_lote", "fecha": "2026-06-15", "lote":"nuevo", "cantidad":15, "tipo_cafe":"molido"}
+Nota: Los valores que puedes devolver en la categoría lote deben ser: número específico, "anterior", "actual", "nuevo". El actual es en caso que no se diga nada del lote. En caso que no puedas categorizarlo, el mensaje será de tipo desconocido.
 ### 5. consulta
 Preguntas sobre gastos o inventario. Ejemplos: "¿cuánto me debe Carloko?", "¿cuánto gasté este mes?".
 Devuelve:
