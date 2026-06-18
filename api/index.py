@@ -103,7 +103,7 @@ Devuelve:
 {"tipo": "desconocido", "mensaje_original": "texto del mensaje"}
 ## REGLAS GENERALES
 - La fecha siempre en formato DD-MM-YYYY. Usa la fecha actual si no se especifica.
-- Clientes siempre escribelos con mayúscula al inicio.
+- Clientes siempre escribelos con mayúscula al inicio. Si no hay cliente, deja ese item vacío
 - Cuando el mensaje mencione un día de la semana (ej. "el martes", "el lunes pasado"), calcula la fecha exacta contando hacia atrás desde el día actual indicado en el contexto. Si el día mencionado es el mismo día de la semana que hoy, asume que se refiere a la semana anterior.
 - Los montos siempre en número decimal (sin símbolo $).
 - Devuelve ÚNICAMENTE JSON, nada más.
@@ -148,7 +148,13 @@ def classify_message(text: str, now: datetime) -> str:
         },
         timeout=15,
     )
-    result = response.json()["content"][0]["text"].strip()
+    data = response.json()
+    if data.get("type") == "error":
+        err_type = data.get("error", {}).get("type", "")
+        if err_type in ("authentication_error", "permission_error", "billing_error") or response.status_code in (401, 402, 403):
+            raise RuntimeError("SIN_CREDITOS")
+        raise RuntimeError(data.get("error", {}).get("message", "error desconocido"))
+    result = data["content"][0]["text"].strip()
     if result.startswith("```"):
         result = result.split("\n", 1)[-1]
         result = result.rsplit("```", 1)[0]
@@ -704,6 +710,20 @@ class handler(BaseHTTPRequestHandler):
         quito_tz = pytz.timezone("America/Guayaquil")
         now = datetime.now(quito_tz)
 
+        if text.strip().lower().startswith("/ayuda"):
+            send_message(
+                chat_id,
+                "Soy un bot para registrar gastos e inventario de café. Acepto estos mensajes:\n\n"
+                "💸 *Gasto*\n'gasté 10 en pan', '50 frutería', 'kfc 25'\n\n"
+                "📦 *Ingreso de stock*\n'50 fundas de café molido del lote 3', '20 fundas en grano lote actual'\n\n"
+                "🚚 *Entrega de café*\n'30 fundas a Carloko a $3', 'entregué 15 fundas a Merceditas'\n\n"
+                "💰 *Pago de café*\n'Carloko pagó 10 fundas', 'Merceditas depositó 5 del lote anterior'",
+            )
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
+
         # Single shared client for all sheet operations
         try:
             sheets_client = get_gspread_client()
@@ -723,7 +743,10 @@ class handler(BaseHTTPRequestHandler):
                 log_to_sheet(sheets_client, text, error_reply, now)
             except Exception:
                 pass
-            send_message(chat_id, "Ha ocurrido un error con el modelo. Inténtalo más tarde.")
+            if str(e) == "SIN_CREDITOS":
+                send_message(chat_id, "La cuenta de Anthropic no tiene créditos disponibles. Recarga la cuenta para continuar.")
+            else:
+                send_message(chat_id, "Ha ocurrido un error con el modelo. Inténtalo más tarde.")
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"ok")
@@ -782,6 +805,16 @@ class handler(BaseHTTPRequestHandler):
                             chat_id,
                             f"Pago de {item.get('cantidad')} fundas de {item.get('cliente')} registrado.",
                         )
+
+                elif tipo == "desconocido":
+                    send_message(
+                        chat_id,
+                        "No pude entender el mensaje. Se aceptan mensajes de:\n"
+                        "• Gasto (ej. 'gasté 10 en pan')\n"
+                        "• Ingreso de stock (ej. '50 fundas de café molido del lote 3')\n"
+                        "• Entrega de café (ej. '20 fundas a Carloko a $3')\n"
+                        "• Pago de café (ej. 'Carloko pagó 10 fundas')",
+                    )
 
         except Exception:
             send_message(chat_id, "Hubo un error, inténtalo nuevamente.")
