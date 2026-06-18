@@ -363,6 +363,44 @@ def log_gasto(client, gasto: dict, now: datetime):
     ]})
 
 
+# ── Inventario helpers ─────────────────────────────────────────────────────────
+def _normalize_tipo_cafe(raw: str) -> str | None:
+    """Return 'Grano' or 'Molido', or None if unrecognized."""
+    s = raw.strip().lower()
+    if "grano" in s:
+        return "Grano"
+    if "molido" in s:
+        return "Molido"
+    return None
+
+
+def _parse_num(value) -> float:
+    """Parse a cell value (may contain $, commas) to float."""
+    return float(str(value or "0").replace("$", "").replace(",", "").strip() or "0")
+
+
+def _find_client_row(ws, cliente: str, tipo_cafe: str):
+    """Return 1-based row index where client+type match, or None."""
+    col_b = ws.col_values(2)
+    col_c = ws.col_values(3)
+    for i in range(7, len(col_b)):
+        c_val = col_c[i] if i < len(col_c) else ""
+        if (col_b[i].strip().lower() == cliente.strip().lower() and
+                c_val.strip().lower() == tipo_cafe.strip().lower()):
+            return i + 1
+    return None
+
+
+def _next_empty_row(ws, col_index: int, start_row: int = 8):
+    """Return the row after the last non-empty row in the column (never inserts mid-gap)."""
+    values = ws.col_values(col_index)
+    data = values[start_row - 1:]
+    for i in range(len(data) - 1, -1, -1):
+        if data[i].strip():
+            return start_row + i + 1
+    return start_row
+
+
 # ── Inventario sheet ───────────────────────────────────────────────────────────
 def setup_lote_sheet(spreadsheet, lote_num: int):
     """Create and format a new LOTE sheet."""
@@ -459,26 +497,6 @@ def get_or_create_lote_sheet(spreadsheet, lote_num: int):
         return setup_lote_sheet(spreadsheet, lote_num)
 
 
-def _find_client_row(ws, cliente: str, tipo_cafe: str):
-    """Return 1-based row index where client+type match, or None."""
-    col_b = ws.col_values(2)  # column B
-    col_c = ws.col_values(3)  # column C
-    for i in range(7, len(col_b)):  # data starts at row 8 (index 7)
-        if (col_b[i].strip().lower() == cliente.strip().lower() and
-                col_c[i].strip().lower() == tipo_cafe.strip().lower()):
-            return i + 1
-    return None
-
-
-def _next_empty_row(ws, col_index: int, start_row: int = 8):
-    """Find next empty row in a column (1-based col_index)."""
-    values = ws.col_values(col_index)
-    for i in range(start_row - 1, len(values)):
-        if not values[i].strip():
-            return i + 1
-    return max(len(values) + 1, start_row)
-
-
 def _format_client_row(spreadsheet, ws, row: int):
     border = {"style": "SOLID", "width": 1, "color": {"red": 0, "green": 0, "blue": 0}}
     currency_fmt = {"numberFormat": {"type": "CURRENCY", "pattern": "\"$\"#,##0.00"}}
@@ -536,19 +554,19 @@ def log_inventario_lote(client, item: dict, now: datetime) -> tuple[str | None, 
         return "El tipo de café no es válido. Debe ser 'grano' o 'molido'. Vuelve a escribir el mensaje.", None
 
     # Resolve lote
+    max_ws, max_num = get_max_lote_sheet(spreadsheet)
     try:
         lote_num = int(lote_ref)
         ws = get_or_create_lote_sheet(spreadsheet, lote_num)
     except ValueError:
-        _, max_num = get_max_lote_sheet(spreadsheet)
         if lote_ref in ("nuevo", "new"):
             lote_num = max_num + 1
             ws = setup_lote_sheet(spreadsheet, lote_num)
         else:
             # "actual" or any other non-numeric → use max lote sheet
-            ws, lote_num = get_max_lote_sheet(spreadsheet)
-            if not ws:
+            if not max_ws:
                 return "No hay lotes registrados. Indica un número de lote para crear el primero.", None
+            ws, lote_num = max_ws, max_num
 
     if tipo_cafe == "Grano":
         current = ws.acell("C4").value or "0"
@@ -559,21 +577,6 @@ def log_inventario_lote(client, item: dict, now: datetime) -> tuple[str | None, 
 
     _append_history(ws, spreadsheet, now, "Ingreso stock", "", cantidad, item.get("_raw", ""))
     return None, lote_num
-
-
-def _normalize_tipo_cafe(raw: str) -> str | None:
-    """Return 'Grano' or 'Molido', or None if unrecognized."""
-    s = raw.strip().lower()
-    if "grano" in s:
-        return "Grano"
-    if "molido" in s:
-        return "Molido"
-    return None
-
-
-def _parse_num(value) -> float:
-    """Parse a cell value (may contain $, commas) to float."""
-    return float(str(value or "0").replace("$", "").replace(",", "").strip() or "0")
 
 
 def log_inventario_entrega(client, item: dict, now: datetime) -> str | None:
@@ -716,6 +719,12 @@ class handler(BaseHTTPRequestHandler):
         quito_tz = pytz.timezone("America/Guayaquil")
         now = datetime.now(quito_tz)
 
+        if not text or not text.strip():
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
+
         if text.strip().lower().startswith("/ayuda"):
             send_message(
                 chat_id,
@@ -761,7 +770,7 @@ class handler(BaseHTTPRequestHandler):
         try:
             log_to_sheet(sheets_client, text, reply, now)
         except Exception:
-            send_message(chat_id, "Hubo un error, inténtalo nuevamente.")
+            pass  # log failure is non-critical; continue processing the request
 
         try:
             for item in parse_reply_jsons(reply):
