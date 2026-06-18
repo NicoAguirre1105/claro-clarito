@@ -103,6 +103,7 @@ Devuelve:
 {"tipo": "desconocido", "mensaje_original": "texto del mensaje"}
 ## REGLAS GENERALES
 - La fecha siempre en formato DD-MM-YYYY. Usa la fecha actual si no se especifica.
+- Clientes siempre escribelos con mayúscula al inicio.
 - Cuando el mensaje mencione un día de la semana (ej. "el martes", "el lunes pasado"), calcula la fecha exacta contando hacia atrás desde el día actual indicado en el contexto. Si el día mencionado es el mismo día de la semana que hoy, asume que se refiere a la semana anterior.
 - Los montos siempre en número decimal (sin símbolo $).
 - Devuelve ÚNICAMENTE JSON, nada más.
@@ -535,37 +536,76 @@ def log_inventario_lote(client, item: dict, now: datetime):
     _append_history(ws, spreadsheet, now, "Ingreso stock", "", cantidad, item.get("_raw", ""))
 
 
-def log_inventario_entrega(client, item: dict, now: datetime):
+def _normalize_tipo_cafe(raw: str) -> str | None:
+    """Return 'Grano' or 'Molido', or None if unrecognized."""
+    s = raw.strip().lower()
+    if "grano" in s:
+        return "Grano"
+    if "molido" in s:
+        return "Molido"
+    return None
+
+
+def _parse_num(value) -> float:
+    """Parse a cell value (may contain $, commas) to float."""
+    return float(str(value or "0").replace("$", "").replace(",", "").strip() or "0")
+
+
+def log_inventario_entrega(client, item: dict, now: datetime) -> str | None:
+    """Returns an error message string if something went wrong, else None."""
     spreadsheet = client.open_by_key(SHEET_ID_INVENTARIO)
     ws, _ = get_max_lote_sheet(spreadsheet)
     if not ws:
-        raise ValueError("No hay lotes registrados en el inventario.")
+        return "No hay lotes registrados en el inventario."
 
     cliente   = item.get("cliente", "").strip()
-    tipo_cafe = item.get("tipo_cafe", "molido").strip().capitalize()
+    tipo_cafe = _normalize_tipo_cafe(item.get("tipo_cafe", "molido"))
     cantidad  = int(item.get("cantidad", 0))
-    precio    = float(item.get("precio_unitario", 0))
+    precio    = item.get("precio_unitario")
     pagado    = item.get("pagado_en_momento", False)
 
+    if not cliente:
+        return "La entrega no tiene un cliente asociado. Vuelve a escribir el mensaje con la información correcta."
+
+    if tipo_cafe is None:
+        return "El tipo de café no es válido. Debe ser 'grano' o 'molido'. Vuelve a escribir el mensaje."
+
     existing_row = _find_client_row(ws, cliente, tipo_cafe)
+
+    # Validate stock
+    stock_cell = "E4" if tipo_cafe == "Grano" else "F4"
+    stock = _parse_num(ws.acell(stock_cell).value)
+    if stock < cantidad:
+        return (
+            f"Stock insuficiente de café {tipo_cafe.lower()}. "
+            f"Disponible: {int(stock)} fundas, solicitadas: {cantidad}. "
+            "Verifica el inventario e intenta de nuevo."
+        )
+
     if existing_row:
-        current_d = int(str(ws.cell(existing_row, 4).value or "0").replace(",", "").strip() or "0")
+        current_d = int(_parse_num(ws.cell(existing_row, 4).value))
         ws.update_cell(existing_row, 4, current_d + cantidad)
         if pagado:
-            current_e = int(str(ws.cell(existing_row, 5).value or "0").replace(",", "").strip() or "0")
+            current_e = int(_parse_num(ws.cell(existing_row, 5).value))
             ws.update_cell(existing_row, 5, current_e + cantidad)
     else:
+        if not precio:
+            return (
+                "La entrega no tiene precio unitario y no hay una fila previa para este cliente. "
+                "Vuelve a escribir el mensaje indicando el precio por funda."
+            )
         row = _next_empty_row(ws, col_index=2, start_row=8)
         pagadas = cantidad if pagado else 0
         ws.update(
             f"B{row}:H{row}",
-            [[cliente, tipo_cafe, cantidad, pagadas, precio,
+            [[cliente, tipo_cafe, cantidad, pagadas, float(precio),
               f"=D{row}-E{row}", f"=E{row}*F{row}"]],
             value_input_option="USER_ENTERED",
         )
         _format_client_row(spreadsheet, ws, row)
 
     _append_history(ws, spreadsheet, now, "Venta", cliente, cantidad, item.get("_raw", ""))
+    return None
 
 
 def log_inventario_pago(client, item: dict, now: datetime) -> str | None:
@@ -574,13 +614,21 @@ def log_inventario_pago(client, item: dict, now: datetime) -> str | None:
     lote_ref  = str(item.get("lote", "actual")).strip().lower()
     cliente   = item.get("cliente", "").strip()
     cantidad  = int(item.get("cantidad", 0))
-    tipo_cafe = item.get("tipo_cafe", "molido").strip().capitalize()
+    tipo_cafe = _normalize_tipo_cafe(item.get("tipo_cafe", "molido"))
+
+    if not cliente:
+        return "El pago no tiene un cliente asociado. Vuelve a escribir el mensaje con la información correcta."
+
+    if tipo_cafe is None:
+        return "El tipo de café no es válido. Debe ser 'grano' o 'molido'. Vuelve a escribir el mensaje."
 
     max_ws, max_num = get_max_lote_sheet(spreadsheet)
     if not max_ws:
         return "No hay lotes registrados en el inventario."
 
-    if lote_ref == "anterior":
+    if lote_ref in ("actual", "current"):
+        ws = max_ws
+    elif lote_ref == "anterior":
         target_num = max_num - 1
         if target_num < 1:
             return "No existe un lote anterior."
@@ -589,13 +637,35 @@ def log_inventario_pago(client, item: dict, now: datetime) -> str | None:
         except gspread.WorksheetNotFound:
             return f"No se encontró la hoja LOTE {target_num}."
     else:
-        ws = max_ws
+        try:
+            lote_num = int(lote_ref)
+            try:
+                ws = spreadsheet.worksheet(f"LOTE {lote_num}")
+            except gspread.WorksheetNotFound:
+                return f"No se encontró la hoja LOTE {lote_num}."
+        except ValueError:
+            return (
+                f"El lote '{lote_ref}' no es válido. "
+                "Debe ser un número, 'actual' o 'anterior'. Vuelve a escribir el mensaje."
+            )
 
     existing_row = _find_client_row(ws, cliente, tipo_cafe)
     if not existing_row:
-        return f"No hay una venta registrada a {cliente} de tipo {tipo_cafe}."
+        return (
+            f"No se encontró una venta registrada a {cliente} de café {tipo_cafe.lower()}. "
+            "Verifica que la entrega haya sido ingresada previamente."
+        )
 
-    current_e = int(str(ws.cell(existing_row, 5).value or "0").replace(",", "").strip() or "0")
+    # Validate that deuda (G = col 7) >= cantidad
+    deuda = _parse_num(ws.cell(existing_row, 7).value)
+    if deuda < cantidad:
+        return (
+            f"{cliente} tiene una deuda de {int(deuda)} fundas de {tipo_cafe.lower()}, "
+            f"pero se intenta registrar un pago de {cantidad}. "
+            "Verifica la cantidad e intenta de nuevo."
+        )
+
+    current_e = int(_parse_num(ws.cell(existing_row, 5).value))
     ws.update_cell(existing_row, 5, current_e + cantidad)
 
     _append_history(ws, spreadsheet, now, "Pago", cliente, cantidad, item.get("_raw", ""))
@@ -678,11 +748,14 @@ class handler(BaseHTTPRequestHandler):
                     )
 
                 elif tipo == "inventario_entrega":
-                    log_inventario_entrega(sheets_client, item, now)
-                    send_message(
-                        chat_id,
-                        f"Entrega de {item.get('cantidad')} fundas a {item.get('cliente')} registrada.",
-                    )
+                    error = log_inventario_entrega(sheets_client, item, now)
+                    if error:
+                        send_message(chat_id, error)
+                    else:
+                        send_message(
+                            chat_id,
+                            f"Entrega de {item.get('cantidad')} fundas a {item.get('cliente')} registrada.",
+                        )
 
                 elif tipo == "inventario_pago":
                     error = log_inventario_pago(sheets_client, item, now)
