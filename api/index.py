@@ -94,10 +94,6 @@ Supuestos fijos:
 Devuelve:
 {"tipo": "inventario_lote", "fecha": "2026-06-15", "lote":"nuevo", "cantidad":15, "tipo_cafe":"molido"}
 Nota: Los valores que puedes devolver en la categoría lote deben ser: número específico, "anterior", "actual", "nuevo". El actual es en caso que no se diga nada del lote. En caso que no puedas categorizarlo, el mensaje será de tipo desconocido.
-### 5. consulta
-Preguntas sobre gastos o inventario. Ejemplos: "¿cuánto me debe Carloko?", "¿cuánto gasté este mes?".
-Devuelve:
-{"tipo": "consulta", "pregunta": "¿cuánto me debe Carloko?"}
 ### 6. desconocido
 Si el mensaje no encaja en ninguna categoría.
 Devuelve:
