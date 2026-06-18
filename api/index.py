@@ -91,6 +91,7 @@ Mensajes sobre ingreso de mercadería de un lote de café. Ejemplos: "Ingreso de
 Supuestos fijos:
 - El café es MOLIDO salvo que el mensaje diga explícitamente "en grano"
 - El lote es el actual a menos que se indique un lote específico.
+- Se acepta decir lote nuevo para la creación de un nuevo lote
 Devuelve:
 {"tipo": "inventario_lote", "fecha": "2026-06-15", "lote":"15", "cantidad":15, "tipo_cafe":"molido"}
 ### 5. consulta
@@ -524,25 +525,30 @@ def _append_history(ws, spreadsheet, now: datetime, accion: str, cliente: str, c
     _format_history_row(spreadsheet, ws, row)
 
 
-def log_inventario_lote(client, item: dict, now: datetime) -> str | None:
-    """Returns an error message string if something went wrong, else None."""
+def log_inventario_lote(client, item: dict, now: datetime) -> tuple[str | None, int | None]:
+    """Returns (error_message, None) on failure or (None, lote_num) on success."""
     spreadsheet = client.open_by_key(SHEET_ID_INVENTARIO)
     lote_ref  = str(item.get("lote", "actual")).strip().lower()
     tipo_cafe = _normalize_tipo_cafe(item.get("tipo_cafe", "molido"))
     cantidad  = int(item.get("cantidad", 0))
 
     if tipo_cafe is None:
-        return "El tipo de café no es válido. Debe ser 'grano' o 'molido'. Vuelve a escribir el mensaje."
+        return "El tipo de café no es válido. Debe ser 'grano' o 'molido'. Vuelve a escribir el mensaje.", None
 
     # Resolve lote
     try:
         lote_num = int(lote_ref)
         ws = get_or_create_lote_sheet(spreadsheet, lote_num)
     except ValueError:
-        # "actual" or any non-numeric → use max lote sheet
-        ws, _ = get_max_lote_sheet(spreadsheet)
-        if not ws:
-            return "No hay lotes registrados. Indica un número de lote para crear el primero."
+        _, max_num = get_max_lote_sheet(spreadsheet)
+        if lote_ref in ("nuevo", "new"):
+            lote_num = max_num + 1
+            ws = setup_lote_sheet(spreadsheet, lote_num)
+        else:
+            # "actual" or any other non-numeric → use max lote sheet
+            ws, lote_num = get_max_lote_sheet(spreadsheet)
+            if not ws:
+                return "No hay lotes registrados. Indica un número de lote para crear el primero.", None
 
     if tipo_cafe == "Grano":
         current = ws.acell("C4").value or "0"
@@ -552,7 +558,7 @@ def log_inventario_lote(client, item: dict, now: datetime) -> str | None:
         ws.update("D4", [[int(_parse_num(current)) + cantidad]])
 
     _append_history(ws, spreadsheet, now, "Ingreso stock", "", cantidad, item.get("_raw", ""))
-    return None
+    return None, lote_num
 
 
 def _normalize_tipo_cafe(raw: str) -> str | None:
@@ -776,14 +782,14 @@ class handler(BaseHTTPRequestHandler):
                         send_message(chat_id, f"Gasto {desc_cap} de ${float(item.get('monto')):.2f} ingresado.")
 
                 elif tipo == "inventario_lote":
-                    error = log_inventario_lote(sheets_client, item, now)
+                    error, lote_num = log_inventario_lote(sheets_client, item, now)
                     if error:
                         send_message(chat_id, error)
                     else:
                         tipo_cafe_disp = _normalize_tipo_cafe(item.get("tipo_cafe", "molido")) or "café"
                         send_message(
                             chat_id,
-                            f"Lote {item.get('lote')}: {item.get('cantidad')} fundas de {tipo_cafe_disp.lower()} ingresadas.",
+                            f"Lote {lote_num}: {item.get('cantidad')} fundas de {tipo_cafe_disp.lower()} ingresadas.",
                         )
 
                 elif tipo == "inventario_entrega":
