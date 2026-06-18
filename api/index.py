@@ -518,22 +518,35 @@ def _append_history(ws, spreadsheet, now: datetime, accion: str, cliente: str, c
     _format_history_row(spreadsheet, ws, row)
 
 
-def log_inventario_lote(client, item: dict, now: datetime):
+def log_inventario_lote(client, item: dict, now: datetime) -> str | None:
+    """Returns an error message string if something went wrong, else None."""
     spreadsheet = client.open_by_key(SHEET_ID_INVENTARIO)
-    lote_num  = int(item.get("lote", 1))
-    tipo_cafe = item.get("tipo_cafe", "molido").strip().lower()
+    lote_ref  = str(item.get("lote", "actual")).strip().lower()
+    tipo_cafe = _normalize_tipo_cafe(item.get("tipo_cafe", "molido"))
     cantidad  = int(item.get("cantidad", 0))
 
-    ws = get_or_create_lote_sheet(spreadsheet, lote_num)
+    if tipo_cafe is None:
+        return "El tipo de café no es válido. Debe ser 'grano' o 'molido'. Vuelve a escribir el mensaje."
 
-    if tipo_cafe == "grano":
+    # Resolve lote
+    try:
+        lote_num = int(lote_ref)
+        ws = get_or_create_lote_sheet(spreadsheet, lote_num)
+    except ValueError:
+        # "actual" or any non-numeric → use max lote sheet
+        ws, _ = get_max_lote_sheet(spreadsheet)
+        if not ws:
+            return "No hay lotes registrados. Indica un número de lote para crear el primero."
+
+    if tipo_cafe == "Grano":
         current = ws.acell("C4").value or "0"
-        ws.update("C4", [[int(str(current).replace(",", "").strip() or "0") + cantidad]])
+        ws.update("C4", [[int(_parse_num(current)) + cantidad]])
     else:
         current = ws.acell("D4").value or "0"
-        ws.update("D4", [[int(str(current).replace(",", "").strip() or "0") + cantidad]])
+        ws.update("D4", [[int(_parse_num(current)) + cantidad]])
 
     _append_history(ws, spreadsheet, now, "Ingreso stock", "", cantidad, item.get("_raw", ""))
+    return None
 
 
 def _normalize_tipo_cafe(raw: str) -> str | None:
@@ -740,12 +753,15 @@ class handler(BaseHTTPRequestHandler):
                         send_message(chat_id, f"Gasto {desc_cap} de ${float(item.get('monto')):.2f} ingresado.")
 
                 elif tipo == "inventario_lote":
-                    log_inventario_lote(sheets_client, item, now)
-                    tipo_cafe = item.get("tipo_cafe", "molido").capitalize()
-                    send_message(
-                        chat_id,
-                        f"Lote {item.get('lote')}: {item.get('cantidad')} fundas de {tipo_cafe} ingresadas.",
-                    )
+                    error = log_inventario_lote(sheets_client, item, now)
+                    if error:
+                        send_message(chat_id, error)
+                    else:
+                        tipo_cafe_disp = _normalize_tipo_cafe(item.get("tipo_cafe", "molido")) or "café"
+                        send_message(
+                            chat_id,
+                            f"Lote {item.get('lote')}: {item.get('cantidad')} fundas de {tipo_cafe_disp.lower()} ingresadas.",
+                        )
 
                 elif tipo == "inventario_entrega":
                     error = log_inventario_entrega(sheets_client, item, now)
