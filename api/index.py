@@ -768,10 +768,10 @@ class handler(BaseHTTPRequestHandler):
         except Exception:
             pass  # log failure is non-critical; continue processing the request
 
-        try:
-            for item in parse_reply_jsons(reply):
-                item["_raw"] = text
-                tipo = item.get("tipo")
+        for item in parse_reply_jsons(reply):
+            item["_raw"] = text
+            tipo = item.get("tipo")
+            try:
 
                 if tipo == "gasto":
                     if not item.get("monto") or not item.get("descripcion"):
@@ -827,8 +827,8 @@ class handler(BaseHTTPRequestHandler):
                         "• Pago de café (ej. 'Carloko pagó 10 fundas')",
                     )
 
-        except Exception:
-            send_message(chat_id, "Hubo un error, inténtalo nuevamente.")
+            except Exception:
+                send_message(chat_id, "Hubo un error, inténtalo nuevamente.")
 
         self.send_response(200)
         self.end_headers()
